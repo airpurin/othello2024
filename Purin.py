@@ -65,54 +65,112 @@ def random_place(board, stone):
         if can_place_x_y(board, stone, x, y):
             return x, y
 
+class Node:
+    def __init__(self, board, stone, parent=None, move=None):
+        self.board = [row[:] for row in board]  # 現在の盤面
+        self.stone = stone  # 現在のプレイヤーの石
+        self.parent = parent  # 親ノード
+        self.move = move  # このノードに到達するための手
+        self.children = []  # 子ノードリスト
+        self.visits = 0  # このノードが訪問された回数
+        self.wins = 0  # このノードで得た勝利数
+
+    def uct(self, c=1.41):
+        """
+        UCT (Upper Confidence Bound for Trees) の計算。
+        c: 探索と利用のバランスを調整する定数。
+        """
+        if self.visits == 0:
+            return float('inf')  # 未訪問のノードを優先
+        return self.wins / self.visits + c * math.sqrt(math.log(self.parent.visits) / self.visits)
+
+    def is_fully_expanded(self):
+        """
+        子ノードがすべて生成されているかを確認。
+        """
+        valid_moves = [(x, y) for y in range(len(self.board)) for x in range(len(self.board[0]))
+                       if can_place_x_y(self.board, self.stone, x, y)]
+        return len(valid_moves) == len(self.children)
+
+    def best_child(self, c=0):
+        """
+        最も評価の高い子ノードを返す。
+        c=0 の場合、探索ではなく利用のみを重視。
+        """
+        return max(self.children, key=lambda child: child.uct(c))
+
 class PurinAI(object):
     def face(self):
         return "🍮"
 
     def place(self, board, stone):
         """
-        強化されたオセロAI。次の一手を評価して最適な場所を選択する。
-        board: 2次元配列のオセロボード
-        stone: 現在のプレイヤーの石 (1: 黒, 2: 白)
+        モンテカルロ木探索を用いて最適な手を選択。
         """
-        def evaluate_position(x, y):
-            """
-            石を (x, y) に置いたときの評価スコアを計算。
-            """
-            temp_board = [row[:] for row in board]
-            temp_board[y][x] = stone
-            flip_stones(temp_board, stone, x, y)
-            return sum(row.count(stone) for row in temp_board)
+        root = Node(board, stone)
+        for _ in range(500):  # シミュレーション回数
+            self.simulate(root)
+        best_move = root.best_child(c=0).move
+        return best_move
 
-        best_score = -float('inf')
-        best_move = None
+    def simulate(self, node):
+        """
+        モンテカルロ木探索の1回のシミュレーションを実行。
+        """
+        path = self.select(node)
+        leaf = path[-1]
+        if not leaf.is_fully_expanded():
+            leaf = self.expand(leaf)
+        winner = self.rollout(leaf)
+        self.backpropagate(path, winner)
 
-        for y in range(len(board)):
-            for x in range(len(board[0])):
-                if can_place_x_y(board, stone, x, y):
-                    score = evaluate_position(x, y)
-                    if score > best_score:
-                        best_score = score
-                        best_move = (x, y)
+    def select(self, node):
+        """
+        UCT に基づいて最適な子ノードを選択。
+        """
+        path = [node]
+        while node.children:
+            node = node.best_child()
+            path.append(node)
+        return path
 
-        return best_move if best_move else random_place(board, stone)
+    def expand(self, node):
+        """
+        新しい子ノードを1つ生成して返す。
+        """
+        valid_moves = [(x, y) for y in range(len(node.board)) for x in range(len(node.board[0]))
+                       if can_place_x_y(node.board, node.stone, x, y)]
+        for move in valid_moves:
+            if all(child.move != move for child in node.children):
+                new_board = [row[:] for row in node.board]
+                x, y = move
+                new_board[y][x] = node.stone
+                flip_stones(new_board, node.stone, x, y)
+                child = Node(new_board, 3 - node.stone, parent=node, move=move)
+                node.children.append(child)
+                return child
 
-def flip_stones(board, stone, x, y):
-    """
-    石を (x, y) に置いたとき、挟まれた相手の石をひっくり返す。
-    """
-    opponent = 3 - stone
-    directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+    def rollout(self, node):
+        """
+        ランダムプレイアウトを実行し、勝者を返す。
+        """
+        board = [row[:] for row in node.board]
+        stone = node.stone
+        while can_place(board, BLACK) or can_place(board, WHITE):
+            if can_place(board, stone):
+                x, y = random_place(board, stone)
+                board[y][x] = stone
+                flip_stones(board, stone, x, y)
+            stone = 3 - stone
+        black_count = sum(row.count(BLACK) for row in board)
+        white_count = sum(row.count(WHITE) for row in board)
+        return BLACK if black_count > white_count else WHITE if white_count > black_count else 0
 
-    for dx, dy in directions:
-        nx, ny = x + dx, y + dy
-        stones_to_flip = []
-
-        while 0 <= nx < len(board[0]) and 0 <= ny < len(board) and board[ny][nx] == opponent:
-            stones_to_flip.append((nx, ny))
-            nx += dx
-            ny += dy
-
-        if stones_to_flip and 0 <= nx < len(board[0]) and 0 <= ny < len(board) and board[ny][nx] == stone:
-            for fx, fy in stones_to_flip:
-                board[fy][fx] = stone
+    def backpropagate(self, path, winner):
+        """
+        シミュレーション結果を元にバックプロパゲーションで評価を更新。
+        """
+        for node in reversed(path):
+            node.visits += 1
+            if node.stone == winner:
+                node.wins += 1
