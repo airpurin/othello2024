@@ -183,3 +183,10 @@ def train_model(model, optimizer, criterion, data_loader):
             loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
+def best_child(self, c=1.41):
+    """
+    UCTに基づく最良の子ノードを選択。
+    """
+    choices_weights = [(child.wins / (child.visits + 1e-6)) + c * math.sqrt(math.log(self.visits + 1) / (child.visits + 1e-6))
+                       for child in self.children]
+    return self.children[np.argmax(choices_weights)]
