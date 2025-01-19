@@ -1,5 +1,9 @@
 import math
 import random
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
 
 BLACK=1
 WHITE=2
@@ -65,47 +69,39 @@ def random_place(board, stone):
         if can_place_x_y(board, stone, x, y):
             return x, y
 
-class Node:
-    def __init__(self, board, stone, parent=None, move=None):
-        self.board = [row[:] for row in board]  # 現在の盤面
-        self.stone = stone  # 現在のプレイヤーの石
-        self.parent = parent  # 親ノード
-        self.move = move  # このノードに到達するための手
-        self.children = []  # 子ノードリスト
-        self.visits = 0  # このノードが訪問された回数
-        self.wins = 0  # このノードで得た勝利数
+class OthelloNet(nn.Module):
+    def __init__(self):
+        super(OthelloNet, self).__init__()
+        self.conv1 = nn.Conv2d(1, 64, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.fc1 = nn.Linear(128 * 8 * 8, 256)
+        self.fc2 = nn.Linear(256, 1)
 
-    def uct(self, c=1.41):
-        """
-        UCT (Upper Confidence Bound for Trees) の計算。
-        c: 探索と利用のバランスを調整する定数。
-        """
-        if self.visits == 0:
-            return float('inf')  # 未訪問のノードを優先
-        return self.wins / self.visits + c * math.sqrt(math.log(self.parent.visits) / self.visits)
+    def forward(self, x):
+        x = torch.relu(self.conv1(x))
+        x = torch.relu(self.conv2(x))
+        x = x.view(x.size(0), -1)
+        x = torch.relu(self.fc1(x))
+        return torch.tanh(self.fc2(x))  # -1から1のスコアを出力
 
-    def is_fully_expanded(self):
-        """
-        子ノードがすべて生成されているかを確認。
-        """
-        valid_moves = [(x, y) for y in range(len(self.board)) for x in range(len(self.board[0]))
-                       if can_place_x_y(self.board, self.stone, x, y)]
-        return len(valid_moves) == len(self.children)
+# モデルの初期化
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = OthelloNet().to(device)
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+criterion = nn.MSELoss()
 
-    def best_child(self, c=0):
-        """
-        最も評価の高い子ノードを返す。
-        c=0 の場合、探索ではなく利用のみを重視。
-        """
-        return max(self.children, key=lambda child: child.uct(c))
+# AI クラス
+class PurinAI:
+    def __init__(self):
+        self.model = model
+        self.device = device
 
-class PurinAI(object):
     def face(self):
         return "🍮"
 
     def place(self, board, stone):
         """
-        モンテカルロ木探索を用いて最適な手を選択。
+        モンテカルロ木探索 + 深層学習で最適な手を選択。
         """
         root = Node(board, stone)
         for _ in range(500):  # シミュレーション回数
@@ -115,7 +111,7 @@ class PurinAI(object):
 
     def simulate(self, node):
         """
-        モンテカルロ木探索の1回のシミュレーションを実行。
+        MCTS のシミュレーションを実行。
         """
         path = self.select(node)
         leaf = path[-1]
@@ -136,7 +132,7 @@ class PurinAI(object):
 
     def expand(self, node):
         """
-        新しい子ノードを1つ生成して返す。
+        新しい子ノードを1つ生成。
         """
         valid_moves = [(x, y) for y in range(len(node.board)) for x in range(len(node.board[0]))
                        if can_place_x_y(node.board, node.stone, x, y)]
@@ -152,25 +148,38 @@ class PurinAI(object):
 
     def rollout(self, node):
         """
-        ランダムプレイアウトを実行し、勝者を返す。
+        モデルを用いて盤面のスコアを予測。
         """
-        board = [row[:] for row in node.board]
-        stone = node.stone
-        while can_place(board, BLACK) or can_place(board, WHITE):
-            if can_place(board, stone):
-                x, y = random_place(board, stone)
-                board[y][x] = stone
-                flip_stones(board, stone, x, y)
-            stone = 3 - stone
-        black_count = sum(row.count(BLACK) for row in board)
-        white_count = sum(row.count(WHITE) for row in board)
-        return BLACK if black_count > white_count else WHITE if white_count > black_count else 0
+        board_tensor = self.board_to_tensor(node.board).to(self.device)
+        score = self.model(board_tensor).item()
+        return score
 
     def backpropagate(self, path, winner):
         """
-        シミュレーション結果を元にバックプロパゲーションで評価を更新。
+        MCTS の結果をバックプロパゲーション。
         """
         for node in reversed(path):
             node.visits += 1
             if node.stone == winner:
                 node.wins += 1
+
+    def board_to_tensor(self, board):
+        """
+        ボードをモデルの入力形式に変換。
+        """
+        board_array = np.array(board)
+        board_tensor = torch.tensor(board_array, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        return board_tensor
+
+# モデルの学習ループ（任意）
+def train_model(model, optimizer, criterion, data_loader):
+    model.train()
+    for epoch in range(10):  # 10エポックの学習
+        for boards, targets in data_loader:
+            boards = boards.to(device)
+            targets = targets.to(device)
+            optimizer.zero_grad()
+            outputs = model(boards)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.step()
