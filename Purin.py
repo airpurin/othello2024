@@ -1,9 +1,5 @@
 import math
 import random
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import numpy as np
 
 BLACK=1
 WHITE=2
@@ -69,21 +65,6 @@ def random_place(board, stone):
         if can_place_x_y(board, stone, x, y):
             return x, y
 
-class OthelloNet(nn.Module):
-    def __init__(self):
-        super(OthelloNet, self).__init__()
-        self.conv1 = nn.Conv2d(1, 64, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        self.fc1 = nn.Linear(128 * 8 * 8, 256)
-        self.fc2 = nn.Linear(256, 1)
-
-    def forward(self, x):
-        x = torch.relu(self.conv1(x))
-        x = torch.relu(self.conv2(x))
-        x = x.view(x.size(0), -1)
-        x = torch.relu(self.fc1(x))
-        return torch.tanh(self.fc2(x))  # -1から1のスコアを出力
-
 class Node:
     def __init__(self, board, stone, parent=None, move=None):
         self.board = [row[:] for row in board]  # 現在の盤面
@@ -118,24 +99,13 @@ class Node:
         """
         return max(self.children, key=lambda child: child.uct(c))
 
-# モデルの初期化
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = OthelloNet().to(device)
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-criterion = nn.MSELoss()
-
-# AI クラス
-class PurinAI:
-    def __init__(self):
-        self.model = model
-        self.device = device
-
+class PurinAI(object):
     def face(self):
         return "🍮"
 
     def place(self, board, stone):
         """
-        モンテカルロ木探索 + 深層学習で最適な手を選択。
+        モンテカルロ木探索を用いて最適な手を選択。
         """
         root = Node(board, stone)
         for _ in range(500):  # シミュレーション回数
@@ -145,7 +115,7 @@ class PurinAI:
 
     def simulate(self, node):
         """
-        MCTS のシミュレーションを実行。
+        モンテカルロ木探索の1回のシミュレーションを実行。
         """
         path = self.select(node)
         leaf = path[-1]
@@ -166,7 +136,7 @@ class PurinAI:
 
     def expand(self, node):
         """
-        新しい子ノードを1つ生成。
+        新しい子ノードを1つ生成して返す。
         """
         valid_moves = [(x, y) for y in range(len(node.board)) for x in range(len(node.board[0]))
                        if can_place_x_y(node.board, node.stone, x, y)]
@@ -175,27 +145,6 @@ class PurinAI:
                 new_board = [row[:] for row in node.board]
                 x, y = move
                 new_board[y][x] = node.stone
-                    
-                def flip_stones(board, stone, x, y):
-                    """
-                    石を (x, y) に置いたとき、挟まれた相手の石をひっくり返す。
-                    """
-                    opponent = 3 - stone
-                    directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
-
-                    for dx, dy in directions:
-                        nx, ny = x + dx, y + dy
-                        stones_to_flip = []
-
-                        while 0 <= nx < len(board[0]) and 0 <= ny < len(board) and board[ny][nx] == opponent:
-                            stones_to_flip.append((nx, ny))
-                            nx += dx
-                            ny += dy
-
-                        if stones_to_flip and 0 <= nx < len(board[0]) and 0 <= ny < len(board) and board[ny][nx] == stone:
-                            for fx, fy in stones_to_flip:
-                                board[fy][fx] = stone
-                    
                 flip_stones(new_board, node.stone, x, y)
                 child = Node(new_board, 3 - node.stone, parent=node, move=move)
                 node.children.append(child)
@@ -203,45 +152,25 @@ class PurinAI:
 
     def rollout(self, node):
         """
-        モデルを用いて盤面のスコアを予測。
+        ランダムプレイアウトを実行し、勝者を返す。
         """
-        board_tensor = self.board_to_tensor(node.board).to(self.device)
-        score = self.model(board_tensor).item()
-        return score
+        board = [row[:] for row in node.board]
+        stone = node.stone
+        while can_place(board, BLACK) or can_place(board, WHITE):
+            if can_place(board, stone):
+                x, y = random_place(board, stone)
+                board[y][x] = stone
+                flip_stones(board, stone, x, y)
+            stone = 3 - stone
+        black_count = sum(row.count(BLACK) for row in board)
+        white_count = sum(row.count(WHITE) for row in board)
+        return BLACK if black_count > white_count else WHITE if white_count > black_count else 0
 
     def backpropagate(self, path, winner):
         """
-        MCTS の結果をバックプロパゲーション。
+        シミュレーション結果を元にバックプロパゲーションで評価を更新。
         """
         for node in reversed(path):
             node.visits += 1
             if node.stone == winner:
                 node.wins += 1
-
-    def board_to_tensor(self, board):
-        """
-        ボードをモデルの入力形式に変換。
-        """
-        board_array = np.array(board)
-        board_tensor = torch.tensor(board_array, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-        return board_tensor
-
-# モデルの学習ループ（任意）
-def train_model(model, optimizer, criterion, data_loader):
-    model.train()
-    for epoch in range(10):  # 10エポックの学習
-        for boards, targets in data_loader:
-            boards = boards.to(device)
-            targets = targets.to(device)
-            optimizer.zero_grad()
-            outputs = model(boards)
-            loss = criterion(outputs, targets)
-            loss.backward()
-            optimizer.step()
-def best_child(self, c=1.41):
-    """
-    UCTに基づく最良の子ノードを選択。
-    """
-    choices_weights = [(child.wins / (child.visits + 1e-6)) + c * math.sqrt(math.log(self.visits + 1) / (child.visits + 1e-6))
-                       for child in self.children]
-    return self.children[np.argmax(choices_weights)]
