@@ -1,34 +1,23 @@
 import math
 import random
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import numpy as np
 
-BLACK=1
-WHITE=2
+BLACK = 1
+WHITE = 2
 
 board = [
-        [0,0,0,0,0,0],
-        [0,0,0,0,0,0],
-        [0,0,1,2,0,0],
-        [0,0,2,1,0,0],
-        [0,0,0,0,0,0],
-        [0,0,0,0,0,0],
+    [0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0],
+    [0, 0, 1, 2, 0, 0],
+    [0, 0, 2, 1, 0, 0],
+    [0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0],
 ]
 
 def can_place_x_y(board, stone, x, y):
-    """
-    石を置けるかどうかを調べる関数。
-    board: 2次元配列のオセロボード
-    x, y: 石を置きたい座標 (0-indexed)
-    stone: 現在のプレイヤーの石 (1: 黒, 2: 白)
-    return: 置けるなら True, 置けないなら False
-    """
     if board[y][x] != 0:
-        return False  # 既に石がある場合は置けない
+        return False
 
-    opponent = 3 - stone  # 相手の石 (1なら2、2なら1)
+    opponent = 3 - stone
     directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
     for dx, dy in directions:
@@ -41,16 +30,11 @@ def can_place_x_y(board, stone, x, y):
             found_opponent = True
 
         if found_opponent and 0 <= nx < len(board[0]) and 0 <= ny < len(board) and board[ny][nx] == stone:
-            return True  # 石を置ける条件を満たす
+            return True
 
     return False
 
 def can_place(board, stone):
-    """
-    石を置ける場所を調べる関数。
-    board: 2次元配列のオセロボード
-    stone: 現在のプレイヤーの石 (1: 黒, 2: 白)
-    """
     for y in range(len(board)):
         for x in range(len(board[0])):
             if can_place_x_y(board, stone, x, y):
@@ -58,11 +42,6 @@ def can_place(board, stone):
     return False
 
 def random_place(board, stone):
-    """
-    石をランダムに置く関数。
-    board: 2次元配列のオセロボード
-    stone: 現在のプレイヤーの石 (1: 黒, 2: 白)
-    """
     while True:
         x = random.randint(0, len(board[0]) - 1)
         y = random.randint(0, len(board) - 1)
@@ -71,56 +50,57 @@ def random_place(board, stone):
 
 class Node:
     def __init__(self, board, stone, parent=None, move=None):
-        self.board = [row[:] for row in board]  # 現在の盤面
-        self.stone = stone  # 現在のプレイヤーの石
-        self.parent = parent  # 親ノード
-        self.move = move  # このノードに到達するための手
-        self.children = []  # 子ノードリスト
-        self.visits = 0  # このノードが訪問された回数
-        self.wins = 0  # このノードで得た勝利数
+        self.board = [row[:] for row in board]
+        self.stone = stone
+        self.parent = parent
+        self.move = move
+        self.children = []
+        self.visits = 0
+        self.wins = 0
 
     def uct(self, c=1.41):
-        """
-        UCT (Upper Confidence Bound for Trees) の計算。
-        c: 探索と利用のバランスを調整する定数。
-        """
         if self.visits == 0:
-            return float('inf')  # 未訪問のノードを優先
+            return float('inf')
         return self.wins / self.visits + c * math.sqrt(math.log(self.parent.visits) / self.visits)
 
     def is_fully_expanded(self):
-        """
-        子ノードがすべて生成されているかを確認。
-        """
         valid_moves = [(x, y) for y in range(len(self.board)) for x in range(len(self.board[0]))
                        if can_place_x_y(self.board, self.stone, x, y)]
         return len(valid_moves) == len(self.children)
 
     def best_child(self, c=0):
-        """
-        最も評価の高い子ノードを返す。
-        c=0 の場合、探索ではなく利用のみを重視。
-        """
         return max(self.children, key=lambda child: child.uct(c))
 
+def flip_stones(board, stone, x, y):
+    opponent = 3 - stone
+    directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    for dx, dy in directions:
+        nx, ny = x + dx, y + dy
+        stones_to_flip = []
+
+        while 0 <= nx < len(board[0]) and 0 <= ny < len(board) and board[ny][nx] == opponent:
+            stones_to_flip.append((nx, ny))
+            nx += dx
+            ny += dy
+
+        if stones_to_flip and 0 <= nx < len(board[0]) and 0 <= ny < len(board) and board[ny][nx] == stone:
+            for fx, fy in stones_to_flip:
+                board[fy][fx] = stone
+
 class PurinAI(object):
+
     def face(self):
         return "🍮"
 
     def place(self, board, stone):
-        """
-        モンテカルロ木探索を用いて最適な手を選択。
-        """
         root = Node(board, stone)
-        for _ in range(500):  # シミュレーション回数
+        for _ in range(500):  # シミュレーション回数を調整可能
             self.simulate(root)
         best_move = root.best_child(c=0).move
         return best_move
 
     def simulate(self, node):
-        """
-        モンテカルロ木探索の1回のシミュレーションを実行。
-        """
         path = self.select(node)
         leaf = path[-1]
         if not leaf.is_fully_expanded():
@@ -129,9 +109,6 @@ class PurinAI(object):
         self.backpropagate(path, winner)
 
     def select(self, node):
-        """
-        UCT に基づいて最適な子ノードを選択。
-        """
         path = [node]
         while node.children:
             node = node.best_child()
@@ -139,9 +116,6 @@ class PurinAI(object):
         return path
 
     def expand(self, node):
-        """
-        新しい子ノードを1つ生成して返す。
-        """
         valid_moves = [(x, y) for y in range(len(node.board)) for x in range(len(node.board[0]))
                        if can_place_x_y(node.board, node.stone, x, y)]
         for move in valid_moves:
@@ -149,36 +123,12 @@ class PurinAI(object):
                 new_board = [row[:] for row in node.board]
                 x, y = move
                 new_board[y][x] = node.stone
-
-                def flip_stones(board, stone, x, y):
-                    """
-                    石を (x, y) に置いたとき、挟まれた相手の石をひっくり返す。
-                    """
-                    opponent = 3 - stone
-                    directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
-
-                    for dx, dy in directions:
-                        nx, ny = x + dx, y + dy
-                        stones_to_flip = []
-
-                        while 0 <= nx < len(board[0]) and 0 <= ny < len(board) and board[ny][nx] == opponent:
-                            stones_to_flip.append((nx, ny))
-                            nx += dx
-                            ny += dy
-
-                        if stones_to_flip and 0 <= nx < len(board[0]) and 0 <= ny < len(board) and board[ny][nx] == stone:
-                            for fx, fy in stones_to_flip:
-                                board[fy][fx] = stone
-                
                 flip_stones(new_board, node.stone, x, y)
                 child = Node(new_board, 3 - node.stone, parent=node, move=move)
                 node.children.append(child)
                 return child
 
     def rollout(self, node):
-        """
-        ランダムプレイアウトを実行し、勝者を返す。
-        """
         board = [row[:] for row in node.board]
         stone = node.stone
         while can_place(board, BLACK) or can_place(board, WHITE):
@@ -192,9 +142,6 @@ class PurinAI(object):
         return BLACK if black_count > white_count else WHITE if white_count > black_count else 0
 
     def backpropagate(self, path, winner):
-        """
-        シミュレーション結果を元にバックプロパゲーションで評価を更新。
-        """
         for node in reversed(path):
             node.visits += 1
             if node.stone == winner:
