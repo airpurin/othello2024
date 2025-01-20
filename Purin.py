@@ -1,16 +1,16 @@
 import math
 import random
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import numpy as np
 
-# 定数定義
+# 定数
 BLACK = 1
 WHITE = 2
 EMPTY = 0
 
-# 深層学習モデルの定義
+# ニューラルネットワークモデル
 class OthelloNet(nn.Module):
     def __init__(self):
         super(OthelloNet, self).__init__()
@@ -24,15 +24,13 @@ class OthelloNet(nn.Module):
         x = torch.relu(self.conv2(x))
         x = x.view(x.size(0), -1)
         x = torch.relu(self.fc1(x))
-        return torch.tanh(self.fc2(x))  # -1から1のスコアを出力
+        return torch.tanh(self.fc2(x))  # -1 から 1 のスコア
 
-# モデル初期化
+# モデルの初期化
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = OthelloNet().to(device)
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-criterion = nn.MSELoss()
 
-# ノードクラス
+# モンテカルロ木探索ノード
 class Node:
     def __init__(self, board, stone, parent=None, move=None):
         self.board = [row[:] for row in board]
@@ -41,22 +39,22 @@ class Node:
         self.move = move
         self.children = []
         self.visits = 0
-        self.wins = 0
+        self.value_sum = 0
 
     def uct(self, c=1.41):
         if self.visits == 0:
             return float('inf')
-        return self.wins / self.visits + c * math.sqrt(math.log(self.parent.visits) / self.visits)
+        return self.value_sum / self.visits + c * math.sqrt(math.log(self.parent.visits) / self.visits)
+
+    def best_child(self, c=0):
+        return max(self.children, key=lambda child: child.uct(c))
 
     def is_fully_expanded(self):
         valid_moves = [(x, y) for y in range(len(self.board)) for x in range(len(self.board[0]))
                        if can_place_x_y(self.board, self.stone, x, y)]
         return len(valid_moves) == len(self.children)
 
-    def best_child(self, c=0):
-        return max(self.children, key=lambda child: child.uct(c))
-
-# ユーティリティ関数
+# オセロのゲームロジック
 def can_place_x_y(board, stone, x, y):
     if board[y][x] != EMPTY:
         return False
@@ -95,34 +93,29 @@ def flip_stones(board, stone, x, y):
             for fx, fy in stones_to_flip:
                 board[fy][fx] = stone
 
-# PurinAIの定義
+# PurinAI
 class PurinAI:
+    def __init__(self, model):
+        self.model = model
+        self.device = device
+
     def face(self):
         return "🍮"
 
     def place(self, board, stone):
-        move = None
-        if self.is_endgame(board):
-            # 終盤はミニマックス法で最適な手を計算
-            move = self.minimax(board, stone, depth=4)[1]
-        else:
-            # 中盤はMCTS + 深層学習で探索
-            root = Node(board, stone)
-            for _ in range(300):  # MCTSのシミュレーション回数
-                self.simulate(root)
-            move = root.best_child(c=0).move
-        return move
-
-    def is_endgame(self, board):
-        return sum(row.count(EMPTY) for row in board) <= 10
+        root = Node(board, stone)
+        for _ in range(500):  # シミュレーション回数
+            self.simulate(root)
+        best_move = root.best_child(c=0).move
+        return best_move
 
     def simulate(self, node):
         path = self.select(node)
         leaf = path[-1]
         if not leaf.is_fully_expanded():
             leaf = self.expand(leaf)
-        winner = self.rollout(leaf)
-        self.backpropagate(path, winner)
+        value = self.evaluate(leaf)
+        self.backpropagate(path, value)
 
     def select(self, node):
         path = [node]
@@ -144,46 +137,18 @@ class PurinAI:
                 node.children.append(child)
                 return child
 
-    def rollout(self, node):
-        board = [row[:] for row in node.board]
-        stone = node.stone
-        while can_place(board, BLACK) or can_place(board, WHITE):
-            if can_place(board, stone):
-                x, y = random.choice([(x, y) for y in range(len(board)) for x in range(len(board[0])) if can_place_x_y(board, stone, x, y)])
-                board[y][x] = stone
-                flip_stones(board, stone, x, y)
-            stone = 3 - stone
-        black_score = sum(row.count(BLACK) for row in board)
-        white_score = sum(row.count(WHITE) for row in board)
-        return BLACK if black_score > white_score else WHITE if white_score > black_score else 0
+    def evaluate(self, node):
+        board_tensor = self.board_to_tensor(node.board).to(self.device)
+        with torch.no_grad():
+            score = self.model(board_tensor).item()
+        return score
 
-    def backpropagate(self, path, winner):
+    def backpropagate(self, path, value):
         for node in reversed(path):
             node.visits += 1
-            if node.stone == winner:
-                node.wins += 1
+            node.value_sum += value
 
-    def minimax(self, board, stone, depth):
-        if depth == 0 or not can_place(board, stone):
-            return self.evaluate(board, stone), None
-
-        best_score = -float('inf') if stone == BLACK else float('inf')
-        best_move = None
-
-        for y in range(len(board)):
-            for x in range(len(board[0])):
-                if can_place_x_y(board, stone, x, y):
-                    new_board = [row[:] for row in board]
-                    new_board[y][x] = stone
-                    flip_stones(new_board, stone, x, y)
-                    score, _ = self.minimax(new_board, 3 - stone, depth - 1)
-                    if (stone == BLACK and score > best_score) or (stone == WHITE and score < best_score):
-                        best_score = score
-                        best_move = (x, y)
-
-        return best_score, best_move
-
-    def evaluate(self, board, stone):
-        board_tensor = torch.tensor(board, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(device)
-        score = model(board_tensor).item()
-        return score
+    def board_to_tensor(self, board):
+        board_array = np.array(board, dtype=np.float32)
+        board_tensor = torch.tensor(board_array).unsqueeze(0).unsqueeze(0).to(self.device)
+        return board_tenso
