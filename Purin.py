@@ -94,7 +94,12 @@ def flip_stones(board, stone, x, y):
 
 
 class PurinAI(object):
-   
+
+   class PurinAI:
+    def __init__(self, model):
+        self.model = model
+        self.device = device
+    
     def face(self):
         return "🍮"
 
