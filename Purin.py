@@ -1,61 +1,20 @@
 import math
 import random
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import numpy as np
-
 
 BLACK = 1
 WHITE = 2
-EMPTY = 0
 
-class OthelloNet(nn.Module):
-    def __init__(self):
-        super(OthelloNet, self).__init__()
-        self.conv1 = nn.Conv2d(1, 64, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        self.fc1 = nn.Linear(128 * 8 * 8, 256)
-        self.fc2 = nn.Linear(256, 1)
-
-    def forward(self, x):
-        x = torch.relu(self.conv1(x))
-        x = torch.relu(self.conv2(x))
-        x = x.view(x.size(0), -1)
-        x = torch.relu(self.fc1(x))
-        return torch.tanh(self.fc2(x))  # -1 から 1 のスコア
-
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = OthelloNet().to(device)
-
-
-class Node:
-    def __init__(self, board, stone, parent=None, move=None):
-        self.board = [row[:] for row in board]
-        self.stone = stone
-        self.parent = parent
-        self.move = move
-        self.children = []
-        self.visits = 0
-        self.value_sum = 0
-
-    def uct(self, c=1.41):
-        if self.visits == 0:
-            return float('inf')
-        return self.value_sum / self.visits + c * math.sqrt(math.log(self.parent.visits) / self.visits)
-
-    def best_child(self, c=0):
-        return max(self.children, key=lambda child: child.uct(c))
-
-    def is_fully_expanded(self):
-        valid_moves = [(x, y) for y in range(len(self.board)) for x in range(len(self.board[0]))
-                       if can_place_x_y(self.board, self.stone, x, y)]
-        return len(valid_moves) == len(self.children)
-
+board = [
+    [0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0],
+    [0, 0, 1, 2, 0, 0],
+    [0, 0, 2, 1, 0, 0],
+    [0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0],
+]
 
 def can_place_x_y(board, stone, x, y):
-    if board[y][x] != EMPTY:
+    if board[y][x] != 0:
         return False
 
     opponent = 3 - stone
@@ -75,6 +34,43 @@ def can_place_x_y(board, stone, x, y):
 
     return False
 
+def can_place(board, stone):
+    for y in range(len(board)):
+        for x in range(len(board[0])):
+            if can_place_x_y(board, stone, x, y):
+                return True
+    return False
+
+def random_place(board, stone):
+    while True:
+        x = random.randint(0, len(board[0]) - 1)
+        y = random.randint(0, len(board) - 1)
+        if can_place_x_y(board, stone, x, y):
+            return x, y
+
+class Node:
+    def __init__(self, board, stone, parent=None, move=None):
+        self.board = [row[:] for row in board]
+        self.stone = stone
+        self.parent = parent
+        self.move = move
+        self.children = []
+        self.visits = 0
+        self.wins = 0
+
+    def uct(self, c=1.41):
+        if self.visits == 0:
+            return float('inf')
+        return self.wins / self.visits + c * math.sqrt(math.log(self.parent.visits) / self.visits)
+
+    def is_fully_expanded(self):
+        valid_moves = [(x, y) for y in range(len(self.board)) for x in range(len(self.board[0]))
+                       if can_place_x_y(self.board, self.stone, x, y)]
+        return len(valid_moves) == len(self.children)
+
+    def best_child(self, c=0):
+        return max(self.children, key=lambda child: child.uct(c))
+
 def flip_stones(board, stone, x, y):
     opponent = 3 - stone
     directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
@@ -92,20 +88,14 @@ def flip_stones(board, stone, x, y):
             for fx, fy in stones_to_flip:
                 board[fy][fx] = stone
 
-
 class PurinAI(object):
 
-   class PurinAI:
-    def __init__(self, model):
-        self.model = model
-        self.device = device
-    
     def face(self):
         return "🍮"
 
     def place(self, board, stone):
         root = Node(board, stone)
-        for _ in range(500): 
+        for _ in range(500):  # シミュレーション回数を調整可能
             self.simulate(root)
         best_move = root.best_child(c=0).move
         return best_move
@@ -115,8 +105,8 @@ class PurinAI(object):
         leaf = path[-1]
         if not leaf.is_fully_expanded():
             leaf = self.expand(leaf)
-        value = self.evaluate(leaf)
-        self.backpropagate(path, value)
+        winner = self.rollout(leaf)
+        self.backpropagate(path, winner)
 
     def select(self, node):
         path = [node]
@@ -138,18 +128,21 @@ class PurinAI(object):
                 node.children.append(child)
                 return child
 
-    def evaluate(self, node):
-        board_tensor = self.board_to_tensor(node.board).to(self.device)
-        with torch.no_grad():
-            score = self.model(board_tensor).item()
-        return score
+    def rollout(self, node):
+        board = [row[:] for row in node.board]
+        stone = node.stone
+        while can_place(board, BLACK) or can_place(board, WHITE):
+            if can_place(board, stone):
+                x, y = random_place(board, stone)
+                board[y][x] = stone
+                flip_stones(board, stone, x, y)
+            stone = 3 - stone
+        black_count = sum(row.count(BLACK) for row in board)
+        white_count = sum(row.count(WHITE) for row in board)
+        return BLACK if black_count > white_count else WHITE if white_count > black_count else 0
 
-    def backpropagate(self, path, value):
+    def backpropagate(self, path, winner):
         for node in reversed(path):
             node.visits += 1
-            node.value_sum += value
-
-    def board_to_tensor(self, board):
-        board_array = np.array(board, dtype=np.float32)
-        board_tensor = torch.tensor(board_array).unsqueeze(0).unsqueeze(0).to(self.device)
-        return board_tenso
+            if node.stone == winner:
+                node.wins += 1
