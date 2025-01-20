@@ -175,6 +175,27 @@ class PurinAI:
                 new_board = [row[:] for row in node.board]
                 x, y = move
                 new_board[y][x] = node.stone
+                    
+                def flip_stones(board, stone, x, y):
+                    """
+                    石を (x, y) に置いたとき、挟まれた相手の石をひっくり返す。
+                    """
+                    opponent = 3 - stone
+                    directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+                    for dx, dy in directions:
+                        nx, ny = x + dx, y + dy
+                        stones_to_flip = []
+
+                        while 0 <= nx < len(board[0]) and 0 <= ny < len(board) and board[ny][nx] == opponent:
+                            stones_to_flip.append((nx, ny))
+                            nx += dx
+                            ny += dy
+
+                        if stones_to_flip and 0 <= nx < len(board[0]) and 0 <= ny < len(board) and board[ny][nx] == stone:
+                            for fx, fy in stones_to_flip:
+                                board[fy][fx] = stone
+                    
                 flip_stones(new_board, node.stone, x, y)
                 child = Node(new_board, 3 - node.stone, parent=node, move=move)
                 node.children.append(child)
