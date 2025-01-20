@@ -84,6 +84,40 @@ class OthelloNet(nn.Module):
         x = torch.relu(self.fc1(x))
         return torch.tanh(self.fc2(x))  # -1から1のスコアを出力
 
+class Node:
+    def __init__(self, board, stone, parent=None, move=None):
+        self.board = [row[:] for row in board]  # 現在の盤面
+        self.stone = stone  # 現在のプレイヤーの石
+        self.parent = parent  # 親ノード
+        self.move = move  # このノードに到達するための手
+        self.children = []  # 子ノードリスト
+        self.visits = 0  # このノードが訪問された回数
+        self.wins = 0  # このノードで得た勝利数
+
+    def uct(self, c=1.41):
+        """
+        UCT (Upper Confidence Bound for Trees) の計算。
+        c: 探索と利用のバランスを調整する定数。
+        """
+        if self.visits == 0:
+            return float('inf')  # 未訪問のノードを優先
+        return self.wins / self.visits + c * math.sqrt(math.log(self.parent.visits) / self.visits)
+
+    def is_fully_expanded(self):
+        """
+        子ノードがすべて生成されているかを確認。
+        """
+        valid_moves = [(x, y) for y in range(len(self.board)) for x in range(len(self.board[0]))
+                       if can_place_x_y(self.board, self.stone, x, y)]
+        return len(valid_moves) == len(self.children)
+
+    def best_child(self, c=0):
+        """
+        最も評価の高い子ノードを返す。
+        c=0 の場合、探索ではなく利用のみを重視。
+        """
+        return max(self.children, key=lambda child: child.uct(c))
+
 # モデルの初期化
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = OthelloNet().to(device)
