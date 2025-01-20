@@ -5,12 +5,11 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 
-# 定数
+
 BLACK = 1
 WHITE = 2
 EMPTY = 0
 
-# ニューラルネットワークモデル
 class OthelloNet(nn.Module):
     def __init__(self):
         super(OthelloNet, self).__init__()
@@ -26,11 +25,11 @@ class OthelloNet(nn.Module):
         x = torch.relu(self.fc1(x))
         return torch.tanh(self.fc2(x))  # -1 から 1 のスコア
 
-# モデルの初期化
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = OthelloNet().to(device)
 
-# モンテカルロ木探索ノード
+
 class Node:
     def __init__(self, board, stone, parent=None, move=None):
         self.board = [row[:] for row in board]
@@ -54,7 +53,7 @@ class Node:
                        if can_place_x_y(self.board, self.stone, x, y)]
         return len(valid_moves) == len(self.children)
 
-# オセロのゲームロジック
+
 def can_place_x_y(board, stone, x, y):
     if board[y][x] != EMPTY:
         return False
@@ -93,18 +92,15 @@ def flip_stones(board, stone, x, y):
             for fx, fy in stones_to_flip:
                 board[fy][fx] = stone
 
-# PurinAI
-class PurinAI:
-    def __init__(self, model):
-        self.model = model
-        self.device = device
 
+class PurinAI(object):
+   
     def face(self):
         return "🍮"
 
     def place(self, board, stone):
         root = Node(board, stone)
-        for _ in range(500):  # シミュレーション回数
+        for _ in range(500): 
             self.simulate(root)
         best_move = root.best_child(c=0).move
         return best_move
